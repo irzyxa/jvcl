@@ -1,4 +1,4 @@
-{-----------------------------------------------------------------------------
+﻿{-----------------------------------------------------------------------------
 The contents of this file are subject to the Mozilla Public License
 Version 1.1 (the "License"); you may not use this file except in compliance
 with the License. You may obtain a copy of the License at
@@ -10,8 +10,8 @@ the specific language governing rights and limitations under the License.
 
 The Original Code is: JvTrayIcon.PAS, released on 2001-02-28.
 
-The Initial Developer of the Original Code is S�bastien Buysse [sbuysse att buypin dott com]
-Portions created by S�bastien Buysse are Copyright (C) 2001 S�bastien Buysse.
+The Initial Developer of the Original Code is Sйbastien Buysse [sbuysse att buypin dott com]
+Portions created by Sйbastien Buysse are Copyright (C) 2001 Sйbastien Buysse.
 All Rights Reserved.
 
 Contributor(s):
@@ -53,9 +53,24 @@ uses
   {$ENDIF HAS_UNIT_TYPES}
   Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms,
   Menus, ShellAPI, ImgList, DateUtils,
-  JvComponentBase;
+  JvComponentBase, SimpleTimer;
 
 type
+  _TBBUTTON64 = packed record
+    iBitmap: Integer;
+    idCommand: Integer;
+    fsState: Byte;
+    fsStyle: Byte;
+    Padding1: Byte;
+    Padding2: Byte;
+    Padding3: Byte;
+    Padding4: Byte;
+    Padding5: Byte;
+    Padding6: Byte;
+    dwData: Longint;
+    iString: Integer;
+  end;
+
   TBalloonType = (btNone, btError, btInfo, btWarning);
 
   TNotifyIconDataXP = record
@@ -118,6 +133,8 @@ type
     FPopupMenu: TPopupMenu;
     FOnClick: TMouseEvent;
     FOnDblClick: TMouseEvent;
+    FOnMouseEnter: TNotifyEvent;
+    FOnMouseExit: TNotifyEvent;
 
     // Under Windows 2000, in order to hide a balloon hint, BalloonHint must be
     // called with empty strings as many times it was called with real messages.
@@ -145,6 +162,7 @@ type
     FOnMouseDown: TMouseEvent;
     FOnMouseUp: TMouseEvent;
     FOnContextPopup: TContextPopupEvent;
+    FOnKeyEnter: TContextPopupEvent;
     FAnimated: Boolean;
     FDelay: Cardinal;
     FIcons: TCustomImageList;
@@ -161,6 +179,8 @@ type
     FSnap: Boolean;
     FSwingDirectionState: Integer;
     FSwingForthAndBack: Boolean;
+    FExitTimer: TSimpleTimer;
+    FOSVersion: TOSVersionInfo;
     function GetSystemMinimumBalloonDelay: Cardinal;
     procedure DoAnimation;
     procedure DoCloseBalloon;
@@ -180,6 +200,7 @@ type
     procedure Unhook;
     procedure WndProc(var Mesg: TMessage);
     procedure DoContextPopup(X, Y: Integer);
+    procedure DoKeySelect(X, Y: Integer);
     procedure DoMouseDown(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
     procedure DoMouseMove(Shift: TShiftState; X, Y: Integer);
     procedure DoMouseUp(Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
@@ -201,6 +222,9 @@ type
     procedure EndAnimation;
 
     procedure Notification(AComponent: TComponent; Operation: TOperation); override;
+    procedure MouseExitTimerProc(Sender: TObject);
+    procedure MouseEnter; dynamic;
+    procedure MouseExit; dynamic;
   public
     constructor Create(AOwner: TComponent); override;
     destructor Destroy; override;
@@ -211,11 +235,13 @@ type
       TBalloonType = btNone; ADelay: Cardinal = 5000; CancelPrevious: Boolean = False);
     function AcceptBalloons: Boolean;
     procedure HideBalloon;
-    function GetIconRect(var IconRect: TRect): Boolean;
+    function GetIconRect(var IconRect: TRect): Boolean;overload;
 
     property ApplicationVisible: Boolean read GetApplicationVisible write SetApplicationVisible;
     property VisibleInTaskList: Boolean read FTask write SetTask default True;
     property IconVisible: Boolean read GetIconVisible write SetIconVisible;
+    property OnKeyEnter: TContextPopupEvent read FOnKeyEnter write FOnKeyEnter;
+    property Handle: THandle read FHandle;
   published
     property Active: Boolean read FActive write SetActive default False;
     property Animated: Boolean read FAnimated write SetAnimated default False;
@@ -236,6 +262,8 @@ type
     property OnMouseMove: TMouseMoveEvent read FOnMouseMove write FOnMouseMove;
     property OnMouseDown: TMouseEvent read FOnMouseDown write FOnMouseDown;
     property OnMouseUp: TMouseEvent read FOnMouseUp write FOnMouseUp;
+    property OnMouseEnter: TNotifyEvent read FOnMouseEnter write FOnMouseEnter;
+    property OnMouseExit: TNotifyEvent read FOnMouseExit write FOnMouseExit;
     property OnBalloonShow: TNotifyEvent read FOnBalloonShow write FOnBalloonShow;
     property OnBalloonHide: TNotifyEvent read FOnBalloonHide write FOnBalloonHide;
     property OnBalloonClick: TNotifyEvent read FOnBalloonClick write FOnBalloonClick;
@@ -279,6 +307,7 @@ type
     FData: Pointer;
     FIndex: Integer;
     FButton: TTBButton;
+    FButton64: _TBButton64;
     FExtraData: TExtraData;
     procedure Init(const DataSize: Integer);
   public
@@ -290,6 +319,7 @@ type
     function ReadProcessMemory(const Address: Pointer; Count: {$IFDEF RTL230_UP}NativeUInt{$ELSE}DWORD{$ENDIF}; var Buffer): Boolean;
 
     property CurrentButton: TTBButton read FButton;
+    property CurrentButton64: _TBButton64 read FButton64;
     property CurrentWnd: THandle read FExtraData.Wnd;
     property CurrentID: UINT read FExtraData.uID;
 
@@ -361,6 +391,8 @@ const
 
 var
   RegisterServiceProcess: TRegisterServiceProcess = nil;
+  FDidExit: Boolean;
+  LastMoveX, LastMoveY: Integer;
 
 { We get the following messages while clicking:
 
@@ -549,9 +581,15 @@ end;
 constructor TJvTrayIcon.Create(AOwner: TComponent);
 begin
   inherited Create(AOwner);
+  FOSVersion.dwOSVersionInfoSize := SizeOf(FOSVersion);
+  GetVersionEx(FOSVersion);
   FIcon := TIcon.Create;
   FIcon.OnChange := IconChanged;
   FCurrentIcon := TIcon.Create;
+
+  FExitTimer := TSimpleTimer.CreateEx(20, MouseExitTimerProc);
+  FExitTimer.Enabled := True; 
+  FDidExit := True;          // Prevents MouseExit from firing at startup
   FSnap := False;
   FHandle := AllocateHWndEx(WndProc);
 
@@ -570,7 +608,7 @@ destructor TJvTrayIcon.Destroy;
 begin
   StopTimer(DblClickTimer); { Vlad S}
   StopTimer(CloseBalloonTimer);
-
+  FExitTimer.Free;
   SetActive(False);
 
   if not (csDestroying in Application.ComponentState) then
@@ -756,6 +794,20 @@ begin
   end;
 end;
 
+procedure TJvTrayIcon.DoKeySelect(X, Y: Integer);
+var Handled: Boolean;
+begin
+  Handled := False;
+  if Assigned(FOnKeyEnter) then
+    FOnKeyEnter(Self, Point(X, Y), Handled);
+  if not Handled and Assigned(FPopupMenu) then
+  begin
+    SetForegroundWindow(FHandle);
+    FPopupMenu.Popup(X, Y);
+    PostMessage(FHandle, WM_NULL, 0, 0);
+  end;
+end;
+
 procedure TJvTrayIcon.DoMouseDown(Button: TMouseButton; Shift: TShiftState;
   X, Y: Integer);
 begin
@@ -776,6 +828,16 @@ begin
     if tisTrayIconVisible in FState then
       NotifyIcon(NIF_TIP, NIM_MODIFY);
   end;
+
+  if FDidExit then
+  begin
+    FDidExit := False;
+    MouseEnter;
+  end;
+
+  LastMoveX := x;
+  LastMoveY := y;
+
   if Assigned(FOnMouseMove) then
     FOnMouseMove(Self, Shift, X, Y);
 end;
@@ -869,8 +931,21 @@ begin
 end;
 
 function TJvTrayIcon.GetIconRect(var IconRect: TRect): Boolean;
+var IconIdentifier: NOTIFYICONIDENTIFIER;
+    _rect: Trect;
 begin
-  Result := JvTrayIcon.GetIconRect(Self.FHandle, cTaskbarIconIdentifier, IconRect);
+  //AIrza Shell_NotifyIconGetRect minimum supported client Windows 7, 8, 10
+  if ((FOSVersion.dwMajorVersion = 6) and (FOSVersion.dwMinorVersion >= 1))or
+     (FOSVersion.dwMajorVersion = 10)then
+  begin
+    FillChar(IconIdentifier, SizeOf(IconIdentifier), #0);
+    IconIdentifier.cbSize := SizeOf(IconIdentifier);
+    IconIdentifier.hWnd := FIconData.Wnd;
+    IconIdentifier.uID := FIconData.uID;
+    Result := Shell_NotifyIconGetRect(IconIdentifier, IconRect) = 0;
+  end
+  else
+    Result := JvTrayIcon.GetIconRect(Self.FHandle, cTaskbarIconIdentifier, IconRect);
 end;
 
 function TJvTrayIcon.GetIconVisible: Boolean;
@@ -942,8 +1017,8 @@ begin
   begin
     EndAnimation;
 
-    if NotifyIcon(0, NIM_DELETE) then
-      Exclude(FState, tisTrayIconVisible);
+    NotifyIcon(0, NIM_DELETE);
+    Exclude(FState, tisTrayIconVisible); //AIrza always exclude tisTrayIconVisible
   end;
 end;
 
@@ -1046,6 +1121,34 @@ begin
     end;
   end;
 end;
+
+procedure TJvTrayIcon.MouseEnter;
+begin
+  if Assigned(FOnMouseEnter) then
+    FOnMouseEnter(Self);
+end;
+
+procedure TJvTrayIcon.MouseExit;
+begin
+  if Assigned(FOnMouseExit) then
+    FOnMouseExit(Self);
+end;
+
+procedure TJvTrayIcon.MouseExitTimerProc(Sender: TObject);
+var
+  Pt: TPoint;
+begin
+  if FDidExit then
+    Exit;
+  GetCursorPos(Pt);
+  if (Pt.x < LastMoveX) or (Pt.y < LastMoveY) or
+     (Pt.x > LastMoveX) or (Pt.y > LastMoveY) then
+  begin
+    FDidExit := True;
+    MouseExit;
+  end;
+end;
+
 
 procedure TJvTrayIcon.Notification(AComponent: TComponent; Operation: TOperation);
 begin
@@ -1304,8 +1407,6 @@ begin
 end;
 
 procedure TJvTrayIcon.ShowApplication;
-var
-  AppHidden: Boolean;
 begin
   // Note: some actions will show/hide the taskbar button of the application,
   // so we have to do them in a certain order.
@@ -1320,12 +1421,11 @@ begin
       Application.ShowMainForm := True;
   end;
 
-  AppHidden := not ApplicationVisible;
   // Show the taskbar button of the application..
   Include(FVisibility, tvVisibleTaskBar);
   ShowWindow(GetHandleOnTaskBar, SW_SHOW);
 
-  if AppHidden then
+  if not ApplicationVisible then
   begin
     if (tvAnimateToTray in Visibility) and Assigned(Application.MainForm) then
       AnimateFromTray(Application.MainForm.Handle);
@@ -1343,8 +1443,6 @@ begin
     {$ENDIF COMPILER11_UP}
     if Application.MainForm <> nil then
       Application.MainForm.Visible := True;
-    if Snap or (tvAnimateToTray in Visibility) then
-      Application.ShowMainForm := True;
   end;
 
   Exclude(FState, tisAppHiddenButNotMinimized);
@@ -1452,12 +1550,17 @@ begin
                 DoMouseUp(mbMiddle, ShState, Pt.X, Pt.Y);
               WM_RBUTTONUP:
                 DoMouseUp(mbRight, ShState, Pt.X, Pt.Y);
-              WM_CONTEXTMENU, NIN_KEYSELECT:
+              WM_CONTEXTMENU:
                 // WM_CONTEXTMENU: press Shift+F10 while trayicon has focus.
                 // NIN_KEYSELECT:  press Enter or Space while trayicon has focus.
                 // Windows moves the mouse pointer to the trayicon before these messages,
                 // so Pt is valid.
                 DoContextPopup(Pt.X, Pt.Y);
+              NIN_KEYSELECT:
+                // NIN_KEYSELECT:  press Enter or Space while trayicon has focus.
+                // Windows moves the mouse pointer to the trayicon before these messages,
+                // so Pt is valid.
+                DoKeySelect(Pt.X, Pt.Y);
               WM_LBUTTONDBLCLK:
                 DoDoubleClick(mbLeft, ShState, Pt.X, Pt.Y);
               WM_RBUTTONDBLCLK:
@@ -1535,6 +1638,13 @@ begin
             ShowTrayIcon;
         end
         else
+        if (Msg = WM_POWERBROADCAST)and(WParam = PBT_APMRESUMESUSPEND) then
+        begin
+          HideTrayIcon;
+          if Active then
+            ShowTrayIcon;
+        end
+        else
           Result := DefWindowProc(FHandle, Msg, WParam, LParam);
       end; // case
   except
@@ -1543,6 +1653,27 @@ begin
 end;
 
 //=== { TTrayIconEnumerator } ================================================
+function Is64BitWindows: Boolean;
+var
+  IsWow64Process: function(hProcess: THandle; out Wow64Process: Bool): Bool; stdcall;
+  Wow64Process: Bool;
+begin
+  {$IF Defined(CPU64)}
+  Result := True; // 64-битная программа запускается только на Win64
+  {$ELSEIF Defined(CPU16)}
+  Result := False; // Win64 не поддерживает 16-ти разрядные приложения
+  {$ELSE}
+  // 32-х битные программы могут работать и на 32-х разрядной и на 64-х разрядной Windows
+  // так что этот вопрос требует дальнейшего исследования
+  IsWow64Process := GetProcAddress(GetModuleHandle(Kernel32), 'IsWow64Process');
+
+  Wow64Process := False;
+  if Assigned(IsWow64Process) then
+    Wow64Process := IsWow64Process(GetCurrentProcess, Wow64Process) and Wow64Process;
+
+  Result := Wow64Process;
+  {$IFEND}
+end;
 
 constructor TTrayIconEnumerator.Create(DataSize: Integer);
 begin
@@ -1556,7 +1687,10 @@ end;
 constructor TTrayIconEnumerator.Create;
 begin
   inherited Create;
-  Init(SizeOf(TTBButton));
+  if Is64BitWindows then
+    Init(SizeOf(_TBButton64))
+  else
+    Init(SizeOf(TTBButton));
   FIndex := FCount;
 end;
 
@@ -1604,6 +1738,7 @@ begin
 end;
 
 function TTrayIconEnumerator.MoveNext: Boolean;
+var ret: {$IFDEF RTL230_UP}NativeUInt{$ELSE}Cardinal{$ENDIF};
 begin
   Result := False;
 
@@ -1617,13 +1752,28 @@ begin
     SendMessage(FToolbarHandle, TB_GETBUTTON, FIndex, LPARAM(FData));
 
     // Read the data from the tray process into the current process.
-    if ReadProcessMemory(FData, SizeOf(FButton), FButton) then
+    if Is64BitWindows then
     begin
-      // Read the extra data, Button.dwData points to its location
-      if ReadProcessMemory(Pointer(FButton.dwData), SizeOf(FExtraData), FExtraData) then
+      if Windows.ReadProcessMemory(FProcess, FData, @FButton64,SizeOf(FButton64),ret) then
       begin
-        Result := True;
-        Exit;
+        // Read the extra data, Button.dwData points to its location
+        if Windows.ReadProcessMemory(FProcess,PChar(FButton64.dwData),@FExtraData,4,ret) then
+        begin
+          Result := True;
+          Exit;
+        end;
+      end;
+    end
+    else
+    begin
+      if ReadProcessMemory(FData, SizeOf(FButton), FButton) then
+      begin
+        // Read the extra data, Button.dwData points to its location
+        if ReadProcessMemory(Pointer(FButton.dwData), SizeOf(FExtraData), FExtraData) then
+        begin
+          Result := True;
+          Exit;
+        end;
       end;
     end;
 
