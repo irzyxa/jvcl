@@ -350,6 +350,7 @@ type
     property Columns;
     property DropDownLines;
     property Delimiter;
+    property DisabledColor;
 
     property Align;
     property HintColor;
