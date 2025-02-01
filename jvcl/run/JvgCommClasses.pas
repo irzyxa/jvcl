@@ -1993,7 +1993,7 @@ begin
           case Orientation of
             fgdHorizontal:
               begin
-                if FReverse then
+                if not FReverse then
                 begin
                   ColorR.Top := r.Bottom - MulDiv(I, h, NumberOfColors);
                   ColorR.Bottom := r.Bottom - MulDiv(I + 1, h, NumberOfColors);
@@ -2071,8 +2071,8 @@ begin
       end;
     end;
     //    if NumberOfColors=0 then exit;
-    if I / NumberOfColors * 100 > PercentFilling then
-      Break;
+//    if I / NumberOfColors * 100 > PercentFilling then
+//      Break;
   end;
 
   if BufferedDraw then

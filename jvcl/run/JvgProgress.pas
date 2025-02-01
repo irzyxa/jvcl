@@ -57,6 +57,7 @@ type
     FImage: TBitmap;
     FBackImage: TBitmap;
     FNeedRebuildBackground: Boolean;
+    FOrientation: TglOrientation;
     procedure SetBevelInner(Value: TPanelBevel);
     procedure SetBevelOuter(Value: TPanelBevel);
     procedure SetBevelBold(Value: Boolean);
@@ -68,6 +69,7 @@ type
     procedure SetInterspace(Value: Integer);
     procedure SetOptions(Value: TglProgressOptions);
     procedure OnSmthChanged(Sender: TObject);
+    procedure SetOrientation(const Value: TglOrientation);
   protected
     procedure TextChanged; override;
     procedure Loaded; override;
@@ -89,6 +91,7 @@ type
     property Step: Integer read FStep write SetStep default 3;
     property Interspace: Integer read FInterspace write SetInterspace default 1;
     property Options: TglProgressOptions read FOptions write SetOptions;
+    property Orientation: TglOrientation read FOrientation write SetOrientation;
     property Anchors;
     property Align;
     property Caption;
@@ -125,7 +128,7 @@ const
 implementation
 
 uses
-  JvResources;
+  JvResources, Types;
 
 constructor TJvgProgress.Create(AOwner: TComponent);
 begin
@@ -151,6 +154,7 @@ begin
       Background := 0;
       Caption := RsProgressCaption;
     end;
+  FOrientation := foHorizontal; 
   FColors.OnChanged := OnSmthChanged;
   FGradientBack.OnChanged := OnSmthChanged;
   FGradient.OnChanged := OnSmthChanged;
@@ -201,7 +205,7 @@ procedure TJvgProgress.Paint;
 const
   ShadowDepth = 2;
 var
-  R: TRect;
+  R, RFilling: TRect;
   I, X, X2, Y: Integer;
   Size, TextSize: TSize;
   Capt: string;
@@ -215,10 +219,11 @@ begin
     FNeedRebuildBackground := True;
   end;
   R := ClientRect;
+  RFilling := ClientRect;
   if (fpoTransparent in Options) and FNeedRebuildBackground then
   begin
     (*{$IFDEF JVCLThemesEnabled}
-    if StyleServices.Enabled then
+    if ThemeServices.ThemesEnabled then
       PerformEraseBackground(Self, FBackImage.Canvas.Handle)
     else
     {$ENDIF JVCLThemesEnabled}
@@ -242,20 +247,21 @@ begin
     // PercentWidth := Width;
     Brush.Color := Colors.Background;
     Inc(R.Top);
+    GradientBox(Handle, R, FGradientBack, Integer(psSolid), 1);
     if Percent > 0 then
     begin
-      GradientBox(Handle, R, FGradientBack, Integer(psSolid), 1);
-      GradientBox(Handle, R, FGradient, Integer(psSolid), 1);
+      if Orientation = foHorizontal then
+        RFilling.Right := RFilling.Left + Round(((RFilling.Right-RFilling.Left)/100)*Percent)
+      else
+      if Orientation = foVertical then
+        RFilling.Top := RFilling.Top + Round(((RFilling.Bottom-RFilling.Top)/100)*(100-Percent));
+      GradientBox(Handle, RFilling, FGradient, Integer(psSolid), 1);
+
       X := R.Left;
       if not (fpoTransparent in Options) then
-        for I := R.Left to Width div (FStep + FInterspace) + 1 do
+        for I := R.Left to (R.Right div (FStep + FInterspace))+2  do
         begin
           X2 := X + FInterspace;
-          if X2 > R.Right then
-            if X < R.Right then
-              X2 := R.Right
-            else
-              Break;
           FillRect(Rect(X, R.Top, X2, R.Bottom));
           Inc(X, FStep + FInterspace);
         end;
@@ -266,6 +272,7 @@ begin
     except
       Capt := Caption;
     end;
+    Self.Canvas.Font:=Self.Font;
     GetTextExtentPoint32(Self.Canvas.Handle, PChar(Capt), Length(Capt), Size);
 
     X := 2;
@@ -289,11 +296,11 @@ begin
         begin
           case FCaptionAlignment of
             taCenter:
-              X := (Width - Size.cx) div 2;
+              X := (Width  div 2) - (Size.cx div 2);
             taRightJustify:
               X := Width - Size.cx;
           end;
-          Y := (Height - Size.cy) div 2;
+          Y := (Height div 2) - (Size.cy div 2);
         end;
       fldRightLeft:
         begin
@@ -342,7 +349,7 @@ begin
   Canvas.Draw(0, 0, FImage);
   {$IFDEF JVCLThemesEnabled}
   if BevelBold and ((BevelInner <> bvNone) or (BevelOuter <> bvNone)) and
-    StyleServices.Enabled then
+    ThemeServices.{$IFDEF RTL230_UP}Enabled{$ELSE}ThemesEnabled{$ENDIF RTL230_UP} then
     DrawThemedBorder(Self);
   {$ENDIF JVCLThemesEnabled}
 end;
@@ -440,6 +447,11 @@ begin
   Repaint;
 end;
 
+procedure TJvgProgress.SetOrientation(const Value: TglOrientation);
+begin
+  FOrientation := Value;
+  Repaint;
+end;
 {$IFDEF UNITVERSIONING}
 initialization
   RegisterUnitVersion(HInstance, UnitVersioning);

@@ -85,6 +85,7 @@ type
   TglHorAlign = (fhaLeft, fhaCenter, fhaRight);
   TglSizingDir = (fsdIncrease, fsdDecrease);
   TglScalingDir = (fsdRaising, fsdRecessing);
+  TglOrientation = (foHorizontal, foVertical);
   TglTextStyle = (fstNone, fstRaised, fstRecessed, fstPushed, fstShadow,
     fstVolumetric);
   TglAutoTransparentColor = (ftcUser, ftcLeftTopPixel, ftcLeftBottomPixel,
