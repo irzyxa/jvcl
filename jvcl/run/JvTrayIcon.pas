@@ -1137,16 +1137,18 @@ end;
 procedure TJvTrayIcon.MouseExitTimerProc(Sender: TObject);
 var
   Pt: TPoint;
+  IconRect: TRect;
 begin
   if FDidExit then
     Exit;
   GetCursorPos(Pt);
-  if (Pt.x < LastMoveX) or (Pt.y < LastMoveY) or
-     (Pt.x > LastMoveX) or (Pt.y > LastMoveY) then
-  begin
-    FDidExit := True;
-    MouseExit;
-  end;
+  if (Pt.x = LastMoveX) and (Pt.y = LastMoveY) then
+    Exit;
+  //AIrza The shell reports mouse moves over the icon late (Windows 11); the cursor has left only when it is off the icon
+  if GetIconRect(IconRect) and PtInRect(IconRect, Pt) then
+    Exit;
+  FDidExit := True;
+  MouseExit;
 end;
 
 
