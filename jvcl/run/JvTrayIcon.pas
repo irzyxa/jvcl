@@ -126,6 +126,7 @@ type
     procedure SetPopupMenu(const Value: TPopupMenu);
   protected
     FActive: Boolean;
+    FIconHidden: Boolean;
     FIcon: TIcon;
     FIconData: TNotifyIconDataXP;
     FHandle: THandle;
@@ -187,6 +188,8 @@ type
     procedure DoTimerDblClick; { Vlad S}
     procedure IconChanged(Sender: TObject);
     procedure SetActive(Value: Boolean);
+    procedure SetIconHidden(const Value: Boolean);
+    function ApplyIconState: UINT;
     procedure SetAnimated(const Value: Boolean);
     procedure SetDelay(const Value: Cardinal);
     procedure SetHint(Value: string);
@@ -244,6 +247,8 @@ type
     property Handle: THandle read FHandle;
   published
     property Active: Boolean read FActive write SetActive default False;
+    //AIrza The icon stays registered but is not shown (NIS_HIDDEN); unlike IconVisible := False, balloons still show
+    property IconHidden: Boolean read FIconHidden write SetIconHidden default False;
     property Animated: Boolean read FAnimated write SetAnimated default False;
     property Icon: TIcon read FIcon write SetIcon;
     property IconIndex: Integer read FIconIndex write SetIconIndex;
@@ -1242,6 +1247,30 @@ begin
   end;
 end;
 
+procedure TJvTrayIcon.SetIconHidden(const Value: Boolean);
+begin
+  if FIconHidden <> Value then
+  begin
+    FIconHidden := Value;
+    if tisTrayIconVisible in FState then
+      NotifyIcon(ApplyIconState, NIM_MODIFY);
+  end;
+end;
+
+//AIrza The state goes with every add, so the icon stays hidden when a restarted Explorer gets it again
+function TJvTrayIcon.ApplyIconState: UINT;
+begin
+  Result := 0;
+  if GetShellVersion < Shell32VersionIE5 then
+    Exit;
+  FIconData.dwStateMask := NIS_HIDDEN;
+  if FIconHidden then
+    FIconData.dwState := NIS_HIDDEN
+  else
+    FIconData.dwState := 0;
+  Result := NIF_STATE;
+end;
+
 procedure TJvTrayIcon.SetAnimated(const Value: Boolean);
 begin
   if Value <> FAnimated then
@@ -1472,7 +1501,7 @@ begin
 
   // All checks passed, make the trayicon visible:
 
-  if NotifyIcon(NIF_MESSAGE or NIF_ICON or NIF_TIP, NIM_ADD) then
+  if NotifyIcon(NIF_MESSAGE or NIF_ICON or NIF_TIP or ApplyIconState, NIM_ADD) then
   begin
     Include(FState, tisTrayIconVisible);
 
