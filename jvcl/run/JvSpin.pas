@@ -1035,6 +1035,11 @@ begin
   GetTextHeight(I, H);
   if I > H then
     I := H;
+  {$IFDEF RTL330_UP}
+  //AIrza When the DPI changes, the VCL sets the new bounds before the new font; measure the text at the control's DPI
+  if (Font.PixelsPerInch > 0) and (Font.PixelsPerInch <> CurrentPPI) then
+    H := MulDiv(H, CurrentPPI, Font.PixelsPerInch);
+  {$ENDIF RTL330_UP}
   Result := H + (GetSystemMetrics(SM_CYBORDER) * 4) + 1;
 end;
 
