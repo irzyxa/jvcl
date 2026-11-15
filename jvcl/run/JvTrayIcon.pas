@@ -117,6 +117,9 @@ type
     FState: TJvTrayIconStates;
     FStreamedActive: Boolean;
     FOnQueryEndSession: TNotifyEvent;
+    //AIrza Per icon: another icon's exit timer must not see this one's mouse moves
+    FDidExit: Boolean;
+    FLastMoveX, FLastMoveY: Integer;
 
     function GetApplicationVisible: Boolean;
     procedure SetApplicationVisible(const Value: Boolean);
@@ -396,8 +399,6 @@ const
 
 var
   RegisterServiceProcess: TRegisterServiceProcess = nil;
-  FDidExit: Boolean;
-  LastMoveX, LastMoveY: Integer;
 
 { We get the following messages while clicking:
 
@@ -840,8 +841,8 @@ begin
     MouseEnter;
   end;
 
-  LastMoveX := x;
-  LastMoveY := y;
+  FLastMoveX := x;
+  FLastMoveY := y;
 
   if Assigned(FOnMouseMove) then
     FOnMouseMove(Self, Shift, X, Y);
@@ -1147,7 +1148,7 @@ begin
   if FDidExit then
     Exit;
   GetCursorPos(Pt);
-  if (Pt.x = LastMoveX) and (Pt.y = LastMoveY) then
+  if (Pt.x = FLastMoveX) and (Pt.y = FLastMoveY) then
     Exit;
   //AIrza The shell reports mouse moves over the icon late (Windows 11); the cursor has left only when it is off the icon
   if GetIconRect(IconRect) and PtInRect(IconRect, Pt) then
