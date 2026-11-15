@@ -120,6 +120,8 @@ type
     //AIrza Per icon: another icon's exit timer must not see this one's mouse moves
     FDidExit: Boolean;
     FLastMoveX, FLastMoveY: Integer;
+    //AIrza Where the shell reported mouse moves over the icon: its place when Shell_NotifyIconGetRect fails (Windows 10)
+    FHoverArea: TRect;
 
     function GetApplicationVisible: Boolean;
     procedure SetApplicationVisible(const Value: Boolean);
@@ -242,6 +244,7 @@ type
     function AcceptBalloons: Boolean;
     procedure HideBalloon;
     function GetIconRect(var IconRect: TRect): Boolean;overload;
+    function GetAnchorRect(var AAnchor: TRect): Boolean;
 
     property ApplicationVisible: Boolean read GetApplicationVisible write SetApplicationVisible;
     property VisibleInTaskList: Boolean read FTask write SetTask default True;
@@ -835,11 +838,15 @@ begin
       NotifyIcon(NIF_TIP, NIM_MODIFY);
   end;
 
+  var LMove := Rect(X, Y, X + 1, Y + 1);
   if FDidExit then
   begin
+    FHoverArea := LMove;
     FDidExit := False;
     MouseEnter;
-  end;
+  end
+  else
+    FHoverArea := TRect.Union(FHoverArea, LMove);
 
   FLastMoveX := x;
   FLastMoveY := y;
@@ -952,6 +959,16 @@ begin
   end
   else
     Result := JvTrayIcon.GetIconRect(Self.FHandle, cTaskbarIconIdentifier, IconRect);
+end;
+
+function TJvTrayIcon.GetAnchorRect(var AAnchor: TRect): Boolean;
+begin
+  Result := GetIconRect(AAnchor);
+  if Result or FHoverArea.IsEmpty then
+    Exit;
+  AAnchor := FHoverArea;
+  AAnchor.Inflate(GetSystemMetrics(SM_CXSMICON) div 2, GetSystemMetrics(SM_CYSMICON) div 2);
+  Result := True;
 end;
 
 function TJvTrayIcon.GetIconVisible: Boolean;
@@ -1151,7 +1168,7 @@ begin
   if (Pt.x = FLastMoveX) and (Pt.y = FLastMoveY) then
     Exit;
   //AIrza The shell reports mouse moves over the icon late (Windows 11); the cursor has left only when it is off the icon
-  if GetIconRect(IconRect) and PtInRect(IconRect, Pt) then
+  if GetAnchorRect(IconRect) and PtInRect(IconRect, Pt) then
     Exit;
   FDidExit := True;
   MouseExit;
